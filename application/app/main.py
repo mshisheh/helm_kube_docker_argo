@@ -3,11 +3,10 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
 
+import joblib
 from fastapi import FastAPI, HTTPException, Request
 from prometheus_client import Counter, Histogram, make_asgi_app
-from sklearn.neighbors import KNeighborsClassifier
 
 from app.schemas import HealthResponse, IrisFeatures, PredictionResponse, VersionResponse
 from app.settings import get_settings
@@ -33,18 +32,35 @@ PREDICTION_LATENCY = Histogram(
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     model_path = Path(settings.model_path)
+    metadata_path = Path(settings.model_metadata_path)
     if not model_path.is_file():
         raise RuntimeError(f"Model artifact was not found at {model_path}")
+    if not metadata_path.is_file():
+        raise RuntimeError(f"Model metadata was not found at {metadata_path}")
 
-    artifact: dict[str, Any] = json.loads(model_path.read_text())
-    if artifact["model_type"] != "KNeighborsClassifier":
-        raise RuntimeError(f"Unsupported model type: {artifact['model_type']}")
-    model = KNeighborsClassifier(n_neighbors=artifact["n_neighbors"], weights="distance")
-    model.fit(artifact["features"], artifact["targets"])
-    app.state.model = model
-    app.state.target_names = artifact["target_names"]
-    app.state.model_version = artifact["model_version"]
-    logger.info("Loaded model version %s from %s", app.state.model_version, model_path)
+    metadata = json.loads(metadata_path.read_text())
+    required_fields = {
+        "model_name",
+        "model_version",
+        "training_timestamp",
+        "git_commit",
+        "experiment_run_id",
+        "target_names",
+    }
+    missing_fields = required_fields - metadata.keys()
+    if missing_fields:
+        raise RuntimeError(f"Model metadata is missing: {', '.join(sorted(missing_fields))}")
+
+    app.state.model = joblib.load(model_path)
+    app.state.model_metadata = metadata
+    app.state.target_names = metadata["target_names"]
+    logger.info(
+        "Loaded %s version %s (MLflow run %s) from %s",
+        metadata["model_name"],
+        metadata["model_version"],
+        metadata["experiment_run_id"],
+        model_path,
+    )
     yield
     logger.info("Shutting down application")
 
@@ -73,9 +89,12 @@ def readiness(request: Request) -> HealthResponse:
 
 @app.get("/version", response_model=VersionResponse, tags=["operations"])
 def version(request: Request) -> VersionResponse:
+    metadata = request.app.state.model_metadata
     return VersionResponse(
-        version=settings.app_version,
-        model_version=request.app.state.model_version,
+        application_version=settings.app_version,
+        model_name=metadata["model_name"],
+        model_version=metadata["model_version"],
+        mlflow_run_id=metadata["experiment_run_id"],
     )
 
 
@@ -98,5 +117,5 @@ def predict(features: IrisFeatures, request: Request) -> PredictionResponse:
         class_id=prediction,
         class_name=class_name,
         probabilities=probabilities,
-        model_version=request.app.state.model_version,
+        model_version=request.app.state.model_metadata["model_version"],
     )

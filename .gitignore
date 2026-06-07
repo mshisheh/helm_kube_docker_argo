@@ -13,3 +13,11 @@ htmlcov/
 crash.log
 *.tfvars
 !*.tfvars.example
+
+# Local MLflow tracking and artifact stores
+mlflow.db
+mlruns/
+
+# Production model files are generated from MLflow before image builds.
+application/models/current/model.pkl
+application/models/current/metadata.json

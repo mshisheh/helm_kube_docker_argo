@@ -24,5 +24,7 @@ class HealthResponse(BaseModel):
 
 
 class VersionResponse(BaseModel):
-    version: str
+    application_version: str
+    model_name: str
     model_version: str
+    mlflow_run_id: str

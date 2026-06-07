@@ -37,8 +37,9 @@ repository the source of truth.
 .
 ├── application/                 # Repository 1: service, model, image, tests, CI
 │   ├── app/                     # FastAPI startup/model-loading and endpoints
-│   ├── model/iris.json        # Versioned model artifact
-│   ├── scripts/train_model.py   # Reproducible model training
+│   ├── models/current/          # Production model and registry metadata
+│   ├── scripts/train_model.py   # MLflow experiment training and evaluation
+│   ├── scripts/register_model.py # Registry, promotion, and export commands
 │   ├── tests/                   # API tests
 │   ├── .github/workflows/       # CI image build and GitOps promotion
 │   └── Dockerfile
@@ -61,8 +62,10 @@ repository the source of truth.
 | `GET` | `/metrics` | Prometheus-format request metrics |
 | `GET` | `/docs` | OpenAPI/Swagger interface |
 
-The model is trained deterministically, committed as an artifact, copied into the container, and
-loaded once in FastAPI's application lifespan before readiness succeeds.
+The approved model is exported from the MLflow registry into the Git-ignored `models/current/`
+directory before the image build, copied into the container, and loaded once in FastAPI's application
+lifespan before readiness succeeds. The running service is self-contained and never communicates
+with MLflow, and no binary model artifact is committed to Git.
 
 ## Quick start locally
 
@@ -72,6 +75,8 @@ python -m venv .venv
 . .venv/bin/activate
 pip install -r requirements-dev.txt
 python scripts/train_model.py
+# Register, review, and manually promote the printed run ID; see application/README.md.
+python scripts/register_model.py export-production
 pytest -q
 ruff check .
 docker build -t ml-api:local .
@@ -119,9 +124,10 @@ Federation rather than a stored service-account key.
 
 In the application repository, define:
 
-- Variables: `GCP_PROJECT_ID`, `GAR_LOCATION`, `GAR_REPOSITORY`, and `DEPLOYMENT_REPOSITORY`.
-- Secrets: `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, and
-  `DEPLOYMENT_REPOSITORY_TOKEN`.
+- Variables: `GCP_PROJECT_ID`, `GAR_LOCATION`, `GAR_REPOSITORY`, `DEPLOYMENT_REPOSITORY`,
+  `MLFLOW_TRACKING_URI`, and `MLFLOW_MODEL_NAME`.
+- Secrets: `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`,
+  `DEPLOYMENT_REPOSITORY_TOKEN`, and any credentials required by the MLflow server.
 
 Exact descriptions and examples are in `application/README.md`. Set the deployment repository's
 `image.repository` to the Artifact Registry output before the first sync.
@@ -154,12 +160,24 @@ curl http://EXTERNAL_IP/version
 The exact resource fullname depends on the Argo CD release name and chart helper; use
 `kubectl -n ml-api get all` if you customize it.
 
+## Model lifecycle
+
+1. Train a model and log its parameters, metrics, evaluation artifacts, and model to MLflow.
+2. Register the completed run as a new model version in a non-production state.
+3. Review competing versions and their experiment metrics in MLflow.
+4. Manually mark exactly one reviewed version as `Production`.
+5. Push an application commit; CI downloads and packages only that Production model.
+6. CI pushes the immutable container and updates the deployment repository's Helm image tag.
+7. Argo CD detects the Git change and deploys it through Helm to Kubernetes.
+
+MLflow decides **which** model is approved. GitHub Actions packages it. Argo CD is still the only
+deployment actor, and Git remains the source of truth for deployment state.
+
 ## Demonstration runbook
 
-1. Push an initial commit to application `main`.
-2. Watch GitHub Actions lint/test, build `<region>-docker.pkg.dev/.../ml-api:<40-char SHA>`, and
-   push the image.
-3. Confirm CI commits that SHA to `environments/prod-values.yaml` in the deployment repository.
+1. Train Model A, register it as Version 1, review it, and manually promote Version 1.
+2. Push an application commit and watch CI build an image containing Model Version 1.
+3. Confirm CI commits the Git SHA to `environments/prod-values.yaml` in the deployment repository.
 4. Watch Argo CD sync and Kubernetes roll out without downtime:
 
    ```bash
@@ -167,9 +185,12 @@ The exact resource fullname depends on the Argo CD release name and chart helper
    kubectl -n ml-api rollout status deployment/ml-api-production
    ```
 
-5. Call `/version`; `version` equals the deployed commit SHA.
-6. Change an API response or application version behavior, commit, and push again.
-7. Observe the same promotion flow and a rolling replacement (`maxUnavailable: 0`).
+5. Call `/version` and verify `application_version`, `model_name`, `model_version`, and
+   `mlflow_run_id` identify the deployed application and Model Version 1.
+6. Train Model B, register it as Version 2, review it, and manually promote Version 2.
+7. Push another application commit. Verify CI packages Version 2 and `/version` reports Version 2
+   after Argo CD completes the rollout. No Kubernetes changes or direct MLflow-to-cluster access are
+   required.
 8. Demonstrate drift correction by changing replicas directly. Argo CD restores Git's value:
 
    ```bash

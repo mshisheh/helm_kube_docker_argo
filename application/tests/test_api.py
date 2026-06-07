@@ -30,7 +30,7 @@ def test_predict_setosa() -> None:
     body = response.json()
     assert body["class_id"] == 0
     assert body["class_name"] == "setosa"
-    assert body["model_version"] == "iris-knn-v1"
+    assert body["model_version"] == "1"
     assert abs(sum(body["probabilities"].values()) - 1) < 0.00001
 
 
@@ -49,13 +49,15 @@ def test_invalid_features_are_rejected() -> None:
     assert response.status_code == 422
 
 
-def test_version_uses_runtime_version(monkeypatch) -> None:
+def test_version_reports_application_and_model_identity(monkeypatch) -> None:
     monkeypatch.setattr("app.main.settings.app_version", "test-sha")
     with TestClient(app) as client:
         response = client.get("/version")
 
     assert response.status_code == 200
     assert response.json() == {
-        "version": "test-sha",
-        "model_version": "iris-knn-v1",
+        "application_version": "test-sha",
+        "model_name": "iris-classifier",
+        "model_version": "1",
+        "mlflow_run_id": "test-mlflow-run",
     }
