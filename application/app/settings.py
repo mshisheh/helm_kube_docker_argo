@@ -6,7 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Runtime configuration supplied through environment variables."""
 
-    model_path: str = "model/iris.json"
+    model_path: str = "models/current/model.pkl"
+    model_metadata_path: str = "models/current/metadata.json"
     app_version: str = "development"
     log_level: str = "INFO"
 

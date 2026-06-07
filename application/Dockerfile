@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=app:app app ./app
-COPY --chown=app:app model ./model
+COPY --chown=app:app models ./models
 
 USER 10001
 EXPOSE 8080
