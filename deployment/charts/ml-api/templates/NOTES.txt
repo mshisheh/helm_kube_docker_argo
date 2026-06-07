@@ -1,0 +1,7 @@
+{{- if eq .Values.service.type "LoadBalancer" }}
+Wait for the external IP:
+  kubectl get service {{ include "ml-api.fullname" . }} --namespace {{ .Release.Namespace }} --watch
+{{- else }}
+Port-forward the service:
+  kubectl port-forward service/{{ include "ml-api.fullname" . }} 8080:{{ .Values.service.port }} -n {{ .Release.Namespace }}
+{{- end }}

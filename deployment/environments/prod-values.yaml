@@ -1,0 +1,14 @@
+replicaCount: 2
+
+image:
+  repository: us-central1-docker.pkg.dev/replace-me/ml-images/ml-api
+  tag: "0000000000000000000000000000000000000000"
+
+service:
+  type: LoadBalancer
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70

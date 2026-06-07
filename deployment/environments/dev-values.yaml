@@ -1,0 +1,11 @@
+replicaCount: 1
+
+image:
+  repository: us-central1-docker.pkg.dev/replace-me/ml-images/ml-api
+  tag: "development"
+
+service:
+  type: LoadBalancer
+
+autoscaling:
+  enabled: false
