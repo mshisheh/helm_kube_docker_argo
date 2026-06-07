@@ -1,0 +1,4 @@
+project_id        = "my-ml-platform"
+region            = "us-central1"
+node_zone         = "us-central1-a"
+github_repository = "my-org/ml-api"
